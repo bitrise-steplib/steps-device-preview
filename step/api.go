@@ -21,11 +21,18 @@ const (
 )
 
 type previewOptions struct {
-	Platform      string
-	DeviceModel   string
-	OSVersion     string
-	TTLSeconds    int
-	PostPRComment bool
+	Platform             string
+	DeviceModel          string
+	OSVersion            string
+	Stack                string
+	MachineType          string
+	SystemImage          string
+	EmulatorRAMMB        int
+	EmulatorCores        int
+	EmulatorColdBoot     bool
+	TTLSeconds           int
+	AutoTerminateMinutes int
+	PostPRComment        bool
 }
 
 // apiClient talks to the Bitrise build API, authenticated with the build's own API token.
@@ -58,8 +65,29 @@ func (c apiClient) CreateDevicePreview(artifactSlug string, opts previewOptions)
 	if opts.OSVersion != "" {
 		form.Set("os_version", opts.OSVersion)
 	}
+	if opts.Stack != "" {
+		form.Set("stack_id", opts.Stack)
+	}
+	if opts.MachineType != "" {
+		form.Set("machine_type", opts.MachineType)
+	}
+	if opts.SystemImage != "" {
+		form.Set("system_image", opts.SystemImage)
+	}
+	if opts.EmulatorRAMMB > 0 {
+		form.Set("ram_mb", strconv.Itoa(opts.EmulatorRAMMB))
+	}
+	if opts.EmulatorCores > 0 {
+		form.Set("cores", strconv.Itoa(opts.EmulatorCores))
+	}
+	if opts.EmulatorColdBoot {
+		form.Set("cold_boot", "true")
+	}
 	if opts.TTLSeconds > 0 {
 		form.Set("ttl_seconds", strconv.Itoa(opts.TTLSeconds))
+	}
+	if opts.AutoTerminateMinutes > 0 {
+		form.Set("session_auto_terminate_minutes", strconv.Itoa(opts.AutoTerminateMinutes))
 	}
 
 	body, err := c.postForm(fmt.Sprintf("%s/artifacts/%s/device_preview", c.buildURL, artifactSlug), form)
