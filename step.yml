@@ -92,7 +92,92 @@ inputs:
     description: |-
       OS version to boot, for example `17.5`. Empty uses the platform default.
 
-      Only applies to iOS at the moment: Android previews always use the default system image.
+      Only applies to iOS: on Android the OS version comes from the system image, so set
+      `system_image` instead.
+
+- stack: ""
+  opts:
+    category: Device configuration
+    title: Stack
+    summary: Bitrise stack the preview sessions run on. Empty uses the default for the platform.
+    description: |-
+      Bitrise stack the preview sessions run on, for example `linux-docker-android-22.04`. Empty
+      uses the default for the platform, which is what you usually want.
+
+      The value is validated when the link is created: a stack that does not exist, cannot be
+      provisioned, or does not match the app's platform fails the Step with the backend's
+      message. The available stacks can be listed via the Bitrise API using a Workspace API
+      token (`GET /v1/workspaces/{workspace}/stacks`).
+
+      There is deliberately no cluster input — the cluster is derived from the stack and
+      machine type combination, the same way session creation derives it.
+
+- machine_type: ""
+  opts:
+    category: Device configuration
+    title: Machine type
+    summary: Machine type the preview sessions run on. Empty uses the default for the platform.
+    description: |-
+      Machine type the preview sessions run on, for example `g2.linux.x-large`. Empty uses the
+      default for the platform.
+
+      The value is validated when the link is created: a machine type that does not exist or is
+      too small to run a preview device (an Android emulator needs at least 4 CPUs and 8 GB RAM)
+      fails the Step with the backend's message. The available machine types can be listed via
+      the Bitrise API using a Workspace API token
+      (`GET /v1/workspaces/{workspace}/machine-types`).
+
+- system_image: ""
+  opts:
+    category: Device configuration
+    title: Android system image
+    summary: Android emulator system image package. Empty uses the platform default.
+    description: |-
+      Android only: the sdkmanager system image package the emulator boots, for example
+      `system-images;android-34;google_apis;x86_64`. Empty uses the platform default.
+
+      Only images pre-installed on the stack can boot — they are never downloaded when the
+      device starts. Asking for an image the stack does not have falls back to the closest
+      installed one, with a notice shown to the viewer.
+
+- emulator_ram_mb: ""
+  opts:
+    category: Device configuration
+    title: Emulator RAM (MB)
+    summary: Android emulator RAM in MB. Empty sizes it to the host machine.
+    description: |-
+      Android only: RAM given to the emulator, in MB. Empty sizes it to the host machine
+      (a quarter of the host's RAM, clamped), which is what you usually want.
+
+      When set it must be at least 1024, and it is checked against the machine type the link's
+      sessions run on when the link is created — asking for more RAM than the machine has fails
+      the Step.
+
+- emulator_cores: ""
+  opts:
+    category: Device configuration
+    title: Emulator CPU cores
+    summary: Android emulator CPU core count. Empty sizes it to the host machine.
+    description: |-
+      Android only: CPU cores given to the emulator. Empty sizes it to the host machine (half
+      of the host's cores, clamped), which is what you usually want.
+
+      Checked against the machine type the link's sessions run on when the link is created —
+      asking for more cores than the machine has fails the Step.
+
+- emulator_cold_boot: "false"
+  opts:
+    category: Device configuration
+    title: Cold-boot the emulator?
+    summary: Boot the Android emulator cold on every open, instead of from a snapshot.
+    description: |-
+      Android only: boot the emulator cold (`-no-snapshot-load`) on every open of the link, and
+      never save a quickboot snapshot. Every open then exercises a full first boot, which is
+      slower but closer to what a fresh device does.
+    is_required: true
+    value_options:
+    - "false"
+    - "true"
 
 - link_ttl_hours: ""
   opts:
@@ -103,6 +188,18 @@ inputs:
 
       Short lifetimes are the main protection against a leaked link being used, so prefer the
       shortest one that still fits how your team reviews.
+
+- auto_terminate_minutes: ""
+  opts:
+    title: Minutes before an unwatched device shuts down
+    summary: How long a device session stays up after its last viewer leaves. Empty uses the default of 60 minutes.
+    description: |-
+      How long a device session spawned by the link stays up after its last viewer disconnects,
+      in minutes. Empty uses the default of 60 minutes.
+
+      When set it must be at least 10 minutes — a shorter window would shut sessions down before
+      the device finishes booting — and at most the maximum session lifetime, which bounds a
+      session's total runtime no matter what: auto-terminate can be tuned but never turned off.
 
 - post_pr_comment: "false"
   opts:

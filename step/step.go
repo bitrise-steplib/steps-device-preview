@@ -27,8 +27,16 @@ type Input struct {
 	DeviceModel string `env:"device_model"`
 	OSVersion   string `env:"os_version"`
 
-	LinkTTLHours  string `env:"link_ttl_hours"`
-	PostPRComment bool   `env:"post_pr_comment,opt[true,false]"`
+	Stack            string `env:"stack"`
+	MachineType      string `env:"machine_type"`
+	SystemImage      string `env:"system_image"`
+	EmulatorRAMMB    string `env:"emulator_ram_mb"`
+	EmulatorCores    string `env:"emulator_cores"`
+	EmulatorColdBoot bool   `env:"emulator_cold_boot,opt[true,false]"`
+
+	LinkTTLHours         string `env:"link_ttl_hours"`
+	AutoTerminateMinutes string `env:"auto_terminate_minutes"`
+	PostPRComment        bool   `env:"post_pr_comment,opt[true,false]"`
 
 	PermanentDownloadURLMap string `env:"permanent_download_url_map"`
 
@@ -45,8 +53,16 @@ type Config struct {
 	DeviceModel string
 	OSVersion   string
 
-	LinkTTLSeconds int
-	PostPRComment  bool
+	Stack            string
+	MachineType      string
+	SystemImage      string
+	EmulatorRAMMB    int
+	EmulatorCores    int
+	EmulatorColdBoot bool
+
+	LinkTTLSeconds       int
+	AutoTerminateMinutes int
+	PostPRComment        bool
 
 	PermanentDownloadURLMap string
 
@@ -103,12 +119,32 @@ func (s DevicePreview) ProcessConfig() (Config, error) {
 		return Config{}, err
 	}
 
+	ramMB, err := positiveInt("emulator_ram_mb", input.EmulatorRAMMB)
+	if err != nil {
+		return Config{}, err
+	}
+	cores, err := positiveInt("emulator_cores", input.EmulatorCores)
+	if err != nil {
+		return Config{}, err
+	}
+	autoTerminateMinutes, err := positiveInt("auto_terminate_minutes", input.AutoTerminateMinutes)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		AppPath:                 input.AppPath,
 		Platform:                input.Platform,
 		DeviceModel:             input.DeviceModel,
 		OSVersion:               input.OSVersion,
+		Stack:                   input.Stack,
+		MachineType:             input.MachineType,
+		SystemImage:             input.SystemImage,
+		EmulatorRAMMB:           ramMB,
+		EmulatorCores:           cores,
+		EmulatorColdBoot:        input.EmulatorColdBoot,
 		LinkTTLSeconds:          ttlSeconds,
+		AutoTerminateMinutes:    autoTerminateMinutes,
 		PostPRComment:           input.PostPRComment,
 		PermanentDownloadURLMap: input.PermanentDownloadURLMap,
 		BuildURL:                input.BuildURL,
@@ -123,6 +159,12 @@ func (s DevicePreview) Run(config Config) (Result, error) {
 		return Result{}, err
 	}
 	s.logger.Printf("Platform: %s", artifact.Platform)
+
+	// Catch this before the upload — the backend would reject it anyway, but only after the
+	// artifact round-trip, and with the API's field names instead of the Step's input names.
+	if artifact.Platform == PlatformIOS && hasEmulatorConfig(config) {
+		return Result{}, fmt.Errorf("system_image, emulator_ram_mb, emulator_cores and emulator_cold_boot configure the Android emulator and cannot be used with an iOS app")
+	}
 
 	client := newAPIClient(config.BuildURL, config.BuildAPIToken, s.logger)
 
@@ -143,11 +185,18 @@ func (s DevicePreview) Run(config Config) (Result, error) {
 	s.logger.Infof("Creating the device preview link")
 
 	result, err := client.CreateDevicePreview(slug, previewOptions{
-		Platform:      artifact.Platform,
-		DeviceModel:   config.DeviceModel,
-		OSVersion:     config.OSVersion,
-		TTLSeconds:    config.LinkTTLSeconds,
-		PostPRComment: config.PostPRComment,
+		Platform:             artifact.Platform,
+		DeviceModel:          config.DeviceModel,
+		OSVersion:            config.OSVersion,
+		Stack:                config.Stack,
+		MachineType:          config.MachineType,
+		SystemImage:          config.SystemImage,
+		EmulatorRAMMB:        config.EmulatorRAMMB,
+		EmulatorCores:        config.EmulatorCores,
+		EmulatorColdBoot:     config.EmulatorColdBoot,
+		TTLSeconds:           config.LinkTTLSeconds,
+		AutoTerminateMinutes: config.AutoTerminateMinutes,
+		PostPRComment:        config.PostPRComment,
 	})
 	if err != nil {
 		return Result{}, err
@@ -196,6 +245,28 @@ func commentProblem(result Result) string {
 	}
 
 	return result.PRCommentStatus
+}
+
+func hasEmulatorConfig(config Config) bool {
+	return config.SystemImage != "" || config.EmulatorRAMMB > 0 || config.EmulatorCores > 0 || config.EmulatorColdBoot
+}
+
+// positiveInt parses an optional numeric input; empty means "use the default", which is 0 on the
+// wire. The value's bounds are the backend's to enforce — its message names them.
+func positiveInt(name, raw string) (int, error) {
+	if raw == "" {
+		return 0, nil
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a whole number, got %q", name, raw)
+	}
+	if value <= 0 {
+		return 0, fmt.Errorf("%s must be positive, got %d", name, value)
+	}
+
+	return value, nil
 }
 
 func linkTTLSeconds(rawHours string) (int, error) {
