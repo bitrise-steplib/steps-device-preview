@@ -95,8 +95,10 @@ workflows:
             PLIST
             (cd "$BITRISE_DEPLOY_DIR" && zip -qr "Device Sample.app.zip" "Device Sample.app" && rm -rf "Device Sample.app")
 
-  # The full path through RDE needs `enable-rde-device-preview` on the CI Workspace and the
-  # service to be up, so it stays manual until Device Preview is stable.
+  # The full path through RDE needs the CI Workspace to have RDE access and the
+  # service to be up, so it stays manual — device preview is GA and no longer
+  # behind a rollout flag, but this still spends a real session on a live
+  # backend.
   manual_test_creates_preview_link:
     before_run:
     - _make_simulator_app
