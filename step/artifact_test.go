@@ -126,6 +126,21 @@ func TestPrepareArtifact(t *testing.T) {
 		require.NotEmpty(t, artifact.TempDir)
 		require.Equal(t, artifact.TempDir, filepath.Dir(artifact.Path))
 	})
+
+	t.Run("a .app directory declared as android is rejected without leaving a zip behind", func(t *testing.T) {
+		scratch := t.TempDir()
+		t.Setenv("TMPDIR", scratch)
+		appDir := filepath.Join(t.TempDir(), "Fruta iOS.app")
+		require.NoError(t, os.MkdirAll(appDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(appDir, "Info.plist"), []byte(simulatorPlist), 0o600))
+
+		_, err := previewStep.prepareArtifact(appDir, PlatformAndroid)
+
+		require.ErrorContains(t, err, `the platform input says "android" but the app is a ios build`)
+		leftovers, err := os.ReadDir(scratch)
+		require.NoError(t, err)
+		require.Empty(t, leftovers)
+	})
 }
 
 func TestIsAppInfoPlist(t *testing.T) {
