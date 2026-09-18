@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/bitrise-io/go-steputils/tools"
 	"github.com/bitrise-io/go-steputils/v2/stepconf"
 	"github.com/bitrise-io/go-utils/v2/log"
 )
@@ -48,7 +47,8 @@ type Input struct {
 
 // Config is the validated Step configuration.
 type Config struct {
-	AppPath     string
+	AppPath string
+	// Empty means "detect it from the app".
 	Platform    string
 	DeviceModel string
 	OSVersion   string
@@ -85,15 +85,21 @@ type Result struct {
 	PRCommentMessage string
 }
 
+// OutputExporter exposes values to the Steps that run after this one.
+type OutputExporter interface {
+	ExportOutput(key, value string) error
+}
+
 // DevicePreview creates a device preview link for an app built in this build.
 type DevicePreview struct {
 	logger      log.Logger
 	inputParser stepconf.InputParser
+	exporter    OutputExporter
 }
 
 // New ...
-func New(logger log.Logger, inputParser stepconf.InputParser) DevicePreview {
-	return DevicePreview{logger: logger, inputParser: inputParser}
+func New(logger log.Logger, inputParser stepconf.InputParser, exporter OutputExporter) DevicePreview {
+	return DevicePreview{logger: logger, inputParser: inputParser, exporter: exporter}
 }
 
 // ProcessConfig ...
@@ -106,8 +112,9 @@ func (s DevicePreview) ProcessConfig() (Config, error) {
 	stepconf.Print(input)
 	s.logger.EnableDebugLog(input.Verbose)
 
-	if input.Platform != "" && input.Platform != PlatformIOS && input.Platform != PlatformAndroid {
-		return Config{}, fmt.Errorf("platform must be %q, %q or empty, got %q", PlatformIOS, PlatformAndroid, input.Platform)
+	platform, err := normalisePlatform(input.Platform)
+	if err != nil {
+		return Config{}, err
 	}
 
 	if _, err := os.Stat(input.AppPath); err != nil {
@@ -134,7 +141,7 @@ func (s DevicePreview) ProcessConfig() (Config, error) {
 
 	return Config{
 		AppPath:                 input.AppPath,
-		Platform:                input.Platform,
+		Platform:                platform,
 		DeviceModel:             input.DeviceModel,
 		OSVersion:               input.OSVersion,
 		Stack:                   input.Stack,
@@ -158,21 +165,29 @@ func (s DevicePreview) Run(config Config) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if artifact.TempDir != "" {
+		defer func() {
+			if err := os.RemoveAll(artifact.TempDir); err != nil {
+				s.logger.Debugf("Failed to remove %s: %s", artifact.TempDir, err)
+			}
+		}()
+	}
 	s.logger.Printf("Platform: %s", artifact.Platform)
 
-	// Catch this before the upload — the backend would reject it anyway, but only after the
+	// Catch these before the upload — the backend would reject them anyway, but only after the
 	// artifact round-trip, and with the API's field names instead of the Step's input names.
-	if artifact.Platform == PlatformIOS && hasEmulatorConfig(config) {
-		return Result{}, fmt.Errorf("system_image, emulator_ram_mb, emulator_cores and emulator_cold_boot configure the Android emulator and cannot be used with an iOS app")
+	if err := verifyDeviceConfig(artifact.Platform, config); err != nil {
+		return Result{}, err
 	}
 
 	client := newAPIClient(config.BuildURL, config.BuildAPIToken, s.logger)
 
-	slug := ArtifactSlugFor(config.PermanentDownloadURLMap, filepath.Base(artifact.Path))
+	fileName := filepath.Base(artifact.Path)
+	slug := ArtifactSlugFor(config.PermanentDownloadURLMap, fileName)
 	if slug != "" {
-		s.logger.Donef("Found %s among this build's artifacts (%s).", filepath.Base(artifact.Path), slug)
+		s.logger.Donef("Found %s among this build's artifacts (%s).", fileName, slug)
 	} else {
-		s.logger.Printf("%s was not deployed by an earlier Deploy to Bitrise.io Step, uploading it now.", filepath.Base(artifact.Path))
+		s.logger.Printf("%s was not deployed by an earlier Deploy to Bitrise.io Step, uploading it now.", fileName)
 
 		slug, err = client.UploadArtifact(artifact.Path)
 		if err != nil {
@@ -208,9 +223,9 @@ func (s DevicePreview) Run(config Config) (Result, error) {
 	}
 
 	// The link is the point, so a comment that did not land is worth a warning but not a failure.
-	switch {
-	case result.PRCommentStatus == "":
-	case result.PRCommentStatus == PRCommentPosted:
+	switch result.PRCommentStatus {
+	case "":
+	case PRCommentPosted:
 		s.logger.Donef("Posted the link as a pull request comment.")
 	default:
 		s.logger.Warnf("The link was not posted as a pull request comment: %s", commentProblem(result))
@@ -221,19 +236,19 @@ func (s DevicePreview) Run(config Config) (Result, error) {
 
 // ExportOutputs ...
 func (s DevicePreview) ExportOutputs(result Result) error {
-	outputs := map[string]string{
-		previewURLEnvKey:       result.PreviewURL,
-		previewExpiresAtEnvKey: result.ExpiresAt,
+	outputs := []struct{ key, value string }{
+		{previewURLEnvKey, result.PreviewURL},
+		{previewExpiresAtEnvKey, result.ExpiresAt},
 	}
 
-	for key, value := range outputs {
-		if value == "" {
+	for _, output := range outputs {
+		if output.value == "" {
 			continue
 		}
-		if err := tools.ExportEnvironmentWithEnvman(key, value); err != nil {
-			return fmt.Errorf("export %s: %w", key, err)
+		if err := s.exporter.ExportOutput(output.key, output.value); err != nil {
+			return fmt.Errorf("export %s: %w", output.key, err)
 		}
-		s.logger.Donef("Exported %s", key)
+		s.logger.Donef("Exported %s", output.key)
 	}
 
 	return nil
@@ -245,6 +260,35 @@ func commentProblem(result Result) string {
 	}
 
 	return result.PRCommentStatus
+}
+
+// normalisePlatform maps the `platform` input onto the wire value; "auto" and "" both mean
+// "detect it from the app".
+func normalisePlatform(raw string) (string, error) {
+	switch raw {
+	case "", PlatformAuto:
+		return "", nil
+	case PlatformIOS, PlatformAndroid:
+		return raw, nil
+	default:
+		return "", fmt.Errorf("platform must be %q, %q or %q, got %q", PlatformAuto, PlatformIOS, PlatformAndroid, raw)
+	}
+}
+
+// verifyDeviceConfig rejects device options that do not apply to the app's platform.
+func verifyDeviceConfig(platform string, config Config) error {
+	switch platform {
+	case PlatformIOS:
+		if hasEmulatorConfig(config) {
+			return fmt.Errorf("system_image, emulator_ram_mb, emulator_cores and emulator_cold_boot configure the Android emulator and cannot be used with an iOS app")
+		}
+	case PlatformAndroid:
+		if config.OSVersion != "" {
+			return fmt.Errorf("os_version selects the iOS Simulator runtime and cannot be used with an Android app — set system_image to pick the Android version instead")
+		}
+	}
+
+	return nil
 }
 
 func hasEmulatorConfig(config Config) bool {

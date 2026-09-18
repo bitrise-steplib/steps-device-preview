@@ -32,7 +32,7 @@ const devicePlist = `<?xml version="1.0" encoding="UTF-8"?>
 </plist>`
 
 func TestPrepareArtifact(t *testing.T) {
-	previewStep := New(log.NewLogger(), nil)
+	previewStep := New(log.NewLogger(), nil, nil)
 
 	t.Run("an apk is an android build", func(t *testing.T) {
 		path := writeFile(t, "app-release.apk", "not really an apk")
@@ -122,6 +122,9 @@ func TestPrepareArtifact(t *testing.T) {
 		require.Equal(t, PlatformIOS, artifact.Platform)
 		require.Equal(t, "Fruta iOS.app.zip", filepath.Base(artifact.Path))
 		require.FileExists(t, artifact.Path)
+		// The zip is the Step's own, so Run has to know what to clean up.
+		require.NotEmpty(t, artifact.TempDir)
+		require.Equal(t, artifact.TempDir, filepath.Dir(artifact.Path))
 	})
 }
 

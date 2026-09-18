@@ -2,6 +2,7 @@ package step
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,7 +19,15 @@ import (
 const (
 	apiTimeout    = 60 * time.Second
 	uploadTimeout = 30 * time.Minute
+
+	// The storage PUT is idempotent, so a flaky connection or a 5xx from the bucket is worth
+	// another go. The API POSTs are not retried: a lost response to the create-artifact or
+	// device-preview call could otherwise leave a duplicate behind.
+	uploadAttempts = 3
 )
+
+// uploadRetryDelay is a variable so tests do not have to wait it out.
+var uploadRetryDelay = 5 * time.Second
 
 type previewOptions struct {
 	Platform             string
@@ -37,18 +46,20 @@ type previewOptions struct {
 
 // apiClient talks to the Bitrise build API, authenticated with the build's own API token.
 type apiClient struct {
-	buildURL string
-	token    string
-	logger   log.Logger
-	client   *http.Client
+	buildURL     string
+	token        string
+	logger       log.Logger
+	apiClient    *http.Client
+	uploadClient *http.Client
 }
 
 func newAPIClient(buildURL, token string, logger log.Logger) apiClient {
 	return apiClient{
-		buildURL: strings.TrimSuffix(buildURL, "/"),
-		token:    token,
-		logger:   logger,
-		client:   &http.Client{Timeout: uploadTimeout},
+		buildURL:     strings.TrimSuffix(buildURL, "/"),
+		token:        token,
+		logger:       logger,
+		apiClient:    &http.Client{Timeout: apiTimeout},
+		uploadClient: &http.Client{Timeout: uploadTimeout},
 	}
 }
 
@@ -179,7 +190,41 @@ func (c apiClient) createArtifact(name string, sizeBytes int64) (createdArtifact
 	return created, nil
 }
 
+// putFile uploads the file to the signed storage URL, retrying transient failures.
 func (c apiClient) putFile(uploadURL, path string, sizeBytes int64) error {
+	name := filepath.Base(path)
+
+	var lastErr error
+	for attempt := 1; attempt <= uploadAttempts; attempt++ {
+		if attempt > 1 {
+			c.logger.Warnf("Upload of %s failed (%s), retrying in %s (attempt %d of %d).", name, lastErr, uploadRetryDelay, attempt, uploadAttempts)
+			time.Sleep(uploadRetryDelay)
+		}
+
+		err := c.putFileOnce(uploadURL, path, sizeBytes)
+		if err == nil {
+			return nil
+		}
+
+		var transient *transientError
+		if !errors.As(err, &transient) {
+			return err
+		}
+		lastErr = err
+	}
+
+	return fmt.Errorf("upload %s: giving up after %d attempts: %w", name, uploadAttempts, lastErr)
+}
+
+// transientError marks an upload failure that is worth retrying.
+type transientError struct {
+	err error
+}
+
+func (e *transientError) Error() string { return e.err.Error() }
+func (e *transientError) Unwrap() error { return e.err }
+
+func (c apiClient) putFileOnce(uploadURL, path string, sizeBytes int64) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
@@ -206,17 +251,28 @@ func (c apiClient) putFile(uploadURL, path string, sizeBytes int64) error {
 	// Part of what the GCS signed URL is signed over.
 	request.Header.Set("X-Upload-Content-Length", strconv.FormatInt(sizeBytes, 10))
 
-	response, err := c.client.Do(request)
+	response, err := c.uploadClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("upload %s: %w", filepath.Base(path), err)
+		return &transientError{err: fmt.Errorf("upload %s: %w", filepath.Base(path), err)}
 	}
 	defer c.closeBody(response)
 
-	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return fmt.Errorf("upload %s: storage returned %s", filepath.Base(path), response.Status)
+	if response.StatusCode >= 200 && response.StatusCode <= 299 {
+		return nil
 	}
 
-	return nil
+	err = fmt.Errorf("upload %s: storage returned %s", filepath.Base(path), response.Status)
+	if isTransientStatus(response.StatusCode) {
+		return &transientError{err: err}
+	}
+
+	return err
+}
+
+// isTransientStatus is true for responses where the same request may well succeed a moment
+// later. A 4xx from a signed URL means the signature or the request is wrong, not the moment.
+func isTransientStatus(status int) bool {
+	return status >= 500 || status == http.StatusTooManyRequests || status == http.StatusRequestTimeout
 }
 
 func (c apiClient) finishUpload(artifactID int) error {
@@ -230,9 +286,7 @@ func (c apiClient) finishUpload(artifactID int) error {
 }
 
 func (c apiClient) postForm(endpoint string, form url.Values) ([]byte, error) {
-	client := &http.Client{Timeout: apiTimeout}
-
-	response, err := client.PostForm(endpoint, form)
+	response, err := c.apiClient.PostForm(endpoint, form)
 	if err != nil {
 		return nil, fmt.Errorf("request %s: %w", redactedURL(endpoint), err)
 	}

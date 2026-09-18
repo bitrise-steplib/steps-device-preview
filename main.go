@@ -3,7 +3,9 @@ package main
 import (
 	"os"
 
+	"github.com/bitrise-io/go-steputils/v2/export"
 	"github.com/bitrise-io/go-steputils/v2/stepconf"
+	"github.com/bitrise-io/go-utils/v2/command"
 	"github.com/bitrise-io/go-utils/v2/env"
 	"github.com/bitrise-io/go-utils/v2/log"
 	"github.com/bitrise-io/steps-device-preview/step"
@@ -42,6 +44,7 @@ func run() int {
 func createStep(logger log.Logger) step.DevicePreview {
 	envRepository := env.NewRepository()
 	inputParser := stepconf.NewInputParser(envRepository)
+	exporter := export.NewDefaultExporter(command.NewFactory(envRepository))
 
-	return step.New(logger, inputParser)
+	return step.New(logger, inputParser, &exporter)
 }

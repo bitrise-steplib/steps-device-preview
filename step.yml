@@ -25,7 +25,6 @@ description: |-
     Workflow if you would rather a preview problem did not stop the build.
   - Links expire after 24 hours by default, and 72 hours is the maximum.
   - Each open of a link starts its own session, which shuts down automatically once nobody is watching it.
-  - Device Preview has to be enabled for your Workspace.
 website: https://github.com/bitrise-io/steps-device-preview
 source_code_url: https://github.com/bitrise-io/steps-device-preview
 support_url: https://github.com/bitrise-io/steps-device-preview/issues
@@ -60,17 +59,18 @@ inputs:
       Simulator or Emulator, so the Step rejects them.
     is_required: true
 
-- platform: ""
+- platform: auto
   opts:
     title: Platform
-    summary: Leave empty to detect the platform from the app itself.
+    summary: Detect the platform from the app itself, or pin it to `ios` or `android`.
     description: |-
-      Leave empty to detect the platform from the app itself, which is what you usually want.
+      `auto` detects the platform from the app itself, which is what you usually want.
 
-      Set it to double-check the app you are passing in: the Step fails if the file turns out to
-      be for the other platform.
+      Set it to `ios` or `android` to double-check the app you are passing in: the Step fails if
+      the file turns out to be for the other platform.
+    is_required: true
     value_options:
-    - ""
+    - auto
     - ios
     - android
 
@@ -92,8 +92,8 @@ inputs:
     description: |-
       OS version to boot, for example `17.5`. Empty uses the platform default.
 
-      Only applies to iOS: on Android the OS version comes from the system image, so set
-      `system_image` instead.
+      iOS only: on Android the OS version comes from the system image, so set `system_image`
+      instead. The Step fails if it is set for an Android app.
 
 - stack: ""
   opts:
@@ -208,10 +208,10 @@ inputs:
     description: |-
       Post the link as a comment on the pull request this build belongs to.
 
-      Off by default while Device Preview is being trialled, so switching the Step on somewhere
-      busy cannot start commenting on everyone's pull requests. Ignored when the build is not a
-      pull request build. The link is always exported as `$BITRISE_DEVICE_PREVIEW_URL` either
-      way, so you can share it however you like.
+      Off by default, so adding the Step to a busy Workflow cannot start commenting on everyone's
+      pull requests until you opt in. Ignored when the build is not a pull request build. The link
+      is always exported as `$BITRISE_DEVICE_PREVIEW_URL` either way, so you can share it however
+      you like.
     is_required: true
     value_options:
     - "false"
