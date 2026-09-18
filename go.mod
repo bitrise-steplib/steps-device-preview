@@ -1,4 +1,4 @@
-module github.com/bitrise-io/steps-device-preview
+module github.com/bitrise-steplib/steps-device-preview
 
 go 1.22
 

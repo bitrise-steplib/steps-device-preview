@@ -3,5 +3,5 @@
 _tmp/
 .DS_Store
 
-# Downloaded by the `check` workflow's golangci-lint step.
+# Tooling downloaded by the `check` workflow.
 bin/

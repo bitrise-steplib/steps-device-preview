@@ -8,7 +8,7 @@ import (
 	"github.com/bitrise-io/go-utils/v2/command"
 	"github.com/bitrise-io/go-utils/v2/env"
 	"github.com/bitrise-io/go-utils/v2/log"
-	"github.com/bitrise-io/steps-device-preview/step"
+	"github.com/bitrise-steplib/steps-device-preview/step"
 )
 
 func main() {
