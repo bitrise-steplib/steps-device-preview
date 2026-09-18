@@ -49,6 +49,33 @@ workflows:
             fi
             envman add --key BITRISE_BUILD_STATUS --value "0"
 
+  # An Android App Bundle cannot be installed on an emulator, so it is rejected locally too.
+  test_rejects_android_app_bundle:
+    steps:
+    - script:
+        title: Make a stand-in .aab
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            set -euxo pipefail
+            echo "not really a bundle" > "$BITRISE_DEPLOY_DIR/app-release.aab"
+    - path::./:
+        inputs:
+        - app_path: $BITRISE_DEPLOY_DIR/app-release.aab
+        is_skippable: true
+    - script:
+        title: Check that the Step failed
+        is_always_run: true
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            set -euo pipefail
+            if [ "$BITRISE_BUILD_STATUS" != "1" ]; then
+              echo "Expected the Step to fail on an Android App Bundle"
+              exit 1
+            fi
+            envman add --key BITRISE_BUILD_STATUS --value "0"
+
   _make_simulator_app:
     steps:
     - script:

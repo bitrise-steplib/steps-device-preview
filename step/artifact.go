@@ -13,8 +13,10 @@ import (
 	"howett.net/plist"
 )
 
-// Supported preview platforms, matching the RDE API's `device_spec.platform`.
+// Supported preview platforms, matching the RDE API's `device_spec.platform`, plus the
+// `platform` input's "work it out from the app" value.
 const (
+	PlatformAuto    = "auto"
 	PlatformIOS     = "ios"
 	PlatformAndroid = "android"
 )
@@ -24,6 +26,8 @@ const (
 type Artifact struct {
 	Path     string
 	Platform string
+	// Set when Path was created by the Step and should be removed once it is uploaded.
+	TempDir string
 }
 
 // prepareArtifact turns the user's `app_path` into an uploadable file and works out which
@@ -64,6 +68,9 @@ func (s DevicePreview) prepareAppDirectory(appPath, declaredPlatform string) (Ar
 	if err := verifySimulatorPlist(filepath.Join(appPath, "Info.plist")); err != nil {
 		return Artifact{}, err
 	}
+	if err := verifyDeclaredPlatform(declaredPlatform, PlatformIOS); err != nil {
+		return Artifact{}, err
+	}
 
 	tmpDir, err := os.MkdirTemp("", "device-preview")
 	if err != nil {
@@ -75,10 +82,13 @@ func (s DevicePreview) prepareAppDirectory(appPath, declaredPlatform string) (Ar
 	// isContentOnly=false keeps the .app directory itself inside the archive, which is the
 	// layout RDE's installer looks for.
 	if err := ziputil.ZipDir(appPath, zipPath, false); err != nil {
+		if rmErr := os.RemoveAll(tmpDir); rmErr != nil {
+			s.logger.Debugf("Failed to remove %s: %s", tmpDir, rmErr)
+		}
 		return Artifact{}, fmt.Errorf("zip %s: %w", appPath, err)
 	}
 
-	return Artifact{Path: zipPath, Platform: PlatformIOS}, verifyDeclaredPlatform(declaredPlatform, PlatformIOS)
+	return Artifact{Path: zipPath, Platform: PlatformIOS, TempDir: tmpDir}, nil
 }
 
 func verifyDeclaredPlatform(declared, detected string) error {

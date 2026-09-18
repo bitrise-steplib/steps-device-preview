@@ -32,7 +32,7 @@ const devicePlist = `<?xml version="1.0" encoding="UTF-8"?>
 </plist>`
 
 func TestPrepareArtifact(t *testing.T) {
-	previewStep := New(log.NewLogger(), nil)
+	previewStep := New(log.NewLogger(), nil, nil)
 
 	t.Run("an apk is an android build", func(t *testing.T) {
 		path := writeFile(t, "app-release.apk", "not really an apk")
@@ -122,6 +122,24 @@ func TestPrepareArtifact(t *testing.T) {
 		require.Equal(t, PlatformIOS, artifact.Platform)
 		require.Equal(t, "Fruta iOS.app.zip", filepath.Base(artifact.Path))
 		require.FileExists(t, artifact.Path)
+		// The zip is the Step's own, so Run has to know what to clean up.
+		require.NotEmpty(t, artifact.TempDir)
+		require.Equal(t, artifact.TempDir, filepath.Dir(artifact.Path))
+	})
+
+	t.Run("a .app directory declared as android is rejected without leaving a zip behind", func(t *testing.T) {
+		scratch := t.TempDir()
+		t.Setenv("TMPDIR", scratch)
+		appDir := filepath.Join(t.TempDir(), "Fruta iOS.app")
+		require.NoError(t, os.MkdirAll(appDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(appDir, "Info.plist"), []byte(simulatorPlist), 0o600))
+
+		_, err := previewStep.prepareArtifact(appDir, PlatformAndroid)
+
+		require.ErrorContains(t, err, `the platform input says "android" but the app is a ios build`)
+		leftovers, err := os.ReadDir(scratch)
+		require.NoError(t, err)
+		require.Empty(t, leftovers)
 	})
 }
 
