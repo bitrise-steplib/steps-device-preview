@@ -16,7 +16,6 @@ workflows:
   # would resolve to a failed install.
   test_rejects_device_build:
     envs:
-    - APP_PATH: $BITRISE_DEPLOY_DIR/Device Sample.app.zip
     - EXPECTED_ERROR: is a device build (iphoneos)
     before_run:
     - _make_device_app
@@ -26,7 +25,6 @@ workflows:
   # An Android App Bundle cannot be installed on an emulator, so it is rejected locally too.
   test_rejects_android_app_bundle:
     envs:
-    - APP_PATH: $BITRISE_DEPLOY_DIR/app-release.aab
     - EXPECTED_ERROR: is an Android App Bundle
     before_run:
     - _make_android_app_bundle
@@ -67,6 +65,8 @@ workflows:
         inputs:
         - app_path: $APP_PATH
 
+  # Fixtures for the automated cases live in a temp dir, not in $BITRISE_DEPLOY_DIR: the
+  # Unified CI worker deploys everything left there, and a fake .aab breaks its bundletool check.
   _make_device_app:
     steps:
     - script:
@@ -75,7 +75,8 @@ workflows:
         - content: |-
             #!/usr/bin/env bash
             set -euxo pipefail
-            app_dir="$BITRISE_DEPLOY_DIR/Device Sample.app"
+            fixture_dir="$(mktemp -d)"
+            app_dir="$fixture_dir/Device Sample.app"
             mkdir -p "$app_dir"
             cat > "$app_dir/Info.plist" <<'PLIST'
             <?xml version="1.0" encoding="UTF-8"?>
@@ -88,7 +89,8 @@ workflows:
             </dict>
             </plist>
             PLIST
-            (cd "$BITRISE_DEPLOY_DIR" && zip -qr "Device Sample.app.zip" "Device Sample.app" && rm -rf "Device Sample.app")
+            (cd "$fixture_dir" && zip -qr "Device Sample.app.zip" "Device Sample.app" && rm -rf "Device Sample.app")
+            envman add --key APP_PATH --value "$fixture_dir/Device Sample.app.zip"
 
   _make_android_app_bundle:
     steps:
@@ -98,7 +100,9 @@ workflows:
         - content: |-
             #!/usr/bin/env bash
             set -euxo pipefail
-            echo "not really a bundle" > "$BITRISE_DEPLOY_DIR/app-release.aab"
+            fixture_dir="$(mktemp -d)"
+            echo "not really a bundle" > "$fixture_dir/app-release.aab"
+            envman add --key APP_PATH --value "$fixture_dir/app-release.aab"
 
   _make_simulator_app:
     steps:
