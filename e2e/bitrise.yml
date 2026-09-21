@@ -2,55 +2,97 @@ format_version: "11"
 default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
 
 workflows:
-  # Covers everything up to the API call: the Step has to find the artifact a previous
-  # Deploy to Bitrise.io Step uploaded rather than uploading a second copy. The build running
-  # this workflow is itself the build the artifact belongs to.
-  test_reuses_deployed_artifact:
-    envs:
-    - APP_NAME: E2E Sample.app
-    before_run:
-    - _make_simulator_app
-    steps:
-    - deploy-to-bitrise-io@2:
-        inputs:
-        - deploy_path: $BITRISE_DEPLOY_DIR/$APP_NAME.zip
-    - path::./:
-        inputs:
-        - app_path: $BITRISE_DEPLOY_DIR/$APP_NAME.zip
-        - verbose: "true"
-    - script:
-        title: Check that no second artifact was uploaded
-        inputs:
-        - content: |-
-            #!/usr/bin/env bash
-            set -euxo pipefail
-            echo "$BITRISE_PERMANENT_DOWNLOAD_URL_MAP" | tr '|' '\n' | grep -c "$APP_NAME.zip" | grep -qx 1
+  # Only the automated `test_` workflows run in Unified CI. Everything that reaches the device
+  # preview API is a `manual_test_`: minting a link needs a Workspace API Token with the RDE
+  # product role for the Workspace that owns the build, and the Unified CI Workspace does not
+  # have RDE, so the Step would fail there at the API call. The API paths are covered by unit
+  # tests against a fake build API instead.
+  #
+  # The automated cases expect the Step to fail, so they run it in a nested `bitrise run` whose
+  # exit code and output can be asserted; a failing Step in the test workflow itself would fail
+  # the test.
 
   # A device build must be rejected before any API call: a Simulator cannot run it, so a link
   # would resolve to a failed install.
   test_rejects_device_build:
+    envs:
+    - EXPECTED_ERROR: is a device build (iphoneos)
     before_run:
     - _make_device_app
+    after_run:
+    - _expect_step_failure
+
+  # An Android App Bundle cannot be installed on an emulator, so it is rejected locally too.
+  test_rejects_android_app_bundle:
+    envs:
+    - EXPECTED_ERROR: is an Android App Bundle
+    before_run:
+    - _make_android_app_bundle
+    after_run:
+    - _expect_step_failure
+
+  _expect_step_failure:
     steps:
-    - path::./:
-        inputs:
-        - app_path: $BITRISE_DEPLOY_DIR/Device Sample.app.zip
-        is_skippable: true
     - script:
-        title: Check that the Step failed
-        is_always_run: true
+        title: Check that the Step fails with the expected message
         inputs:
         - content: |-
             #!/usr/bin/env bash
             set -euo pipefail
-            if [ "$BITRISE_BUILD_STATUS" != "1" ]; then
-              echo "Expected the Step to fail on a device build"
+
+            set +e
+            output=$(bitrise run --config ./e2e/bitrise.yml run_step_under_test 2>&1)
+            status=$?
+            set -e
+
+            if [ "$status" -eq 0 ]; then
+              echo "Expected the Step to fail on $APP_PATH"
+              echo "$output" | tail -40
               exit 1
             fi
-            envman add --key BITRISE_BUILD_STATUS --value "0"
+            if ! grep -qF "$EXPECTED_ERROR" <<<"$output"; then
+              echo "The Step failed, but not with \"$EXPECTED_ERROR\""
+              echo "$output" | tail -40
+              exit 1
+            fi
+            echo "The Step failed as expected: $EXPECTED_ERROR"
 
-  # An Android App Bundle cannot be installed on an emulator, so it is rejected locally too.
-  test_rejects_android_app_bundle:
+  # Not a `_` utility workflow because the nested run has to trigger it directly, and not a
+  # `test_` workflow because Unified CI must not run it on its own.
+  run_step_under_test:
+    steps:
+    - path::./:
+        inputs:
+        - app_path: $APP_PATH
+
+  # Fixtures for the automated cases live in a temp dir, not in $BITRISE_DEPLOY_DIR: the
+  # Unified CI worker deploys everything left there, and a fake .aab breaks its bundletool check.
+  _make_device_app:
+    steps:
+    - script:
+        title: Build a minimal device .app and zip it
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            set -euxo pipefail
+            fixture_dir="$(mktemp -d)"
+            app_dir="$fixture_dir/Device Sample.app"
+            mkdir -p "$app_dir"
+            cat > "$app_dir/Info.plist" <<'PLIST'
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+              <key>CFBundleIdentifier</key><string>io.bitrise.e2e.sample</string>
+              <key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>
+              <key>DTPlatformName</key><string>iphoneos</string>
+            </dict>
+            </plist>
+            PLIST
+            (cd "$fixture_dir" && zip -qr "Device Sample.app.zip" "Device Sample.app" && rm -rf "Device Sample.app")
+            envman add --key APP_PATH --value "$fixture_dir/Device Sample.app.zip"
+
+  _make_android_app_bundle:
     steps:
     - script:
         title: Make a stand-in .aab
@@ -58,23 +100,9 @@ workflows:
         - content: |-
             #!/usr/bin/env bash
             set -euxo pipefail
-            echo "not really a bundle" > "$BITRISE_DEPLOY_DIR/app-release.aab"
-    - path::./:
-        inputs:
-        - app_path: $BITRISE_DEPLOY_DIR/app-release.aab
-        is_skippable: true
-    - script:
-        title: Check that the Step failed
-        is_always_run: true
-        inputs:
-        - content: |-
-            #!/usr/bin/env bash
-            set -euo pipefail
-            if [ "$BITRISE_BUILD_STATUS" != "1" ]; then
-              echo "Expected the Step to fail on an Android App Bundle"
-              exit 1
-            fi
-            envman add --key BITRISE_BUILD_STATUS --value "0"
+            fixture_dir="$(mktemp -d)"
+            echo "not really a bundle" > "$fixture_dir/app-release.aab"
+            envman add --key APP_PATH --value "$fixture_dir/app-release.aab"
 
   _make_simulator_app:
     steps:
@@ -99,38 +127,14 @@ workflows:
             PLIST
             (cd "$BITRISE_DEPLOY_DIR" && zip -qr "$APP_NAME.zip" "$APP_NAME" && rm -rf "$APP_NAME")
 
-  _make_device_app:
-    steps:
-    - script:
-        title: Build a minimal device .app and zip it
-        inputs:
-        - content: |-
-            #!/usr/bin/env bash
-            set -euxo pipefail
-            app_dir="$BITRISE_DEPLOY_DIR/Device Sample.app"
-            mkdir -p "$app_dir"
-            cat > "$app_dir/Info.plist" <<'PLIST'
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-              <key>CFBundleIdentifier</key><string>io.bitrise.e2e.sample</string>
-              <key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>
-              <key>DTPlatformName</key><string>iphoneos</string>
-            </dict>
-            </plist>
-            PLIST
-            (cd "$BITRISE_DEPLOY_DIR" && zip -qr "Device Sample.app.zip" "Device Sample.app" && rm -rf "Device Sample.app")
-
-  # The full path through RDE needs the CI Workspace to have RDE access and the
-  # service to be up, so it stays manual — device preview is GA and no longer
-  # behind a rollout flag, but this still spends a real session on a live
-  # backend.
+  # The full path: the Step has to find the artifact a previous Deploy to Bitrise.io Step
+  # uploaded rather than uploading a second copy, then mint a link for it. Run it from a
+  # Workspace that has RDE, on a real Bitrise build.
   manual_test_creates_preview_link:
-    before_run:
-    - _make_simulator_app
     envs:
     - APP_NAME: E2E Sample.app
+    before_run:
+    - _make_simulator_app
     steps:
     - deploy-to-bitrise-io@2:
         inputs:
@@ -138,10 +142,13 @@ workflows:
     - path::./:
         inputs:
         - app_path: $BITRISE_DEPLOY_DIR/$APP_NAME.zip
+        - verbose: "true"
     - script:
-        title: Check that a link was exported
+        title: Check that a link was exported and no second artifact was uploaded
         inputs:
         - content: |-
             #!/usr/bin/env bash
             set -euo pipefail
             [ -n "$BITRISE_DEVICE_PREVIEW_URL" ]
+            [ -n "$BITRISE_DEVICE_PREVIEW_EXPIRES_AT" ]
+            echo "$BITRISE_PERMANENT_DOWNLOAD_URL_MAP" | tr '|' '\n' | grep -c "$APP_NAME.zip" | grep -qx 1

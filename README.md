@@ -1,6 +1,6 @@
 # Device Preview
 
-[![Step changelog](https://shields.io/github/v/release/bitrise-io/steps-device-preview?include_prereleases&label=changelog&color=blueviolet)](https://github.com/bitrise-io/steps-device-preview/releases)
+[![Step changelog](https://shields.io/github/v/release/bitrise-steplib/steps-device-preview?include_prereleases&label=changelog&color=blueviolet)](https://github.com/bitrise-steplib/steps-device-preview/releases)
 
 Run this build on an iOS Simulator or Android Emulator straight from your pull request.
 
@@ -76,7 +76,7 @@ You can also run this step directly with [Bitrise CLI](https://github.com/bitris
 
 ## 🙋 Contributing
 
-We welcome [pull requests](https://github.com/bitrise-io/steps-device-preview/pulls) and [issues](https://github.com/bitrise-io/steps-device-preview/issues) against this repository.
+We welcome [pull requests](https://github.com/bitrise-steplib/steps-device-preview/pulls) and [issues](https://github.com/bitrise-steplib/steps-device-preview/issues) against this repository.
 
 For pull requests, work on your changes in a forked repository and use the Bitrise CLI to [run step tests locally](https://docs.bitrise.io/en/bitrise-ci/bitrise-cli/running-your-first-local-build-with-the-cli.html).
 
