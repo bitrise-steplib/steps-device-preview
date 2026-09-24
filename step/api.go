@@ -33,6 +33,7 @@ type previewOptions struct {
 	Platform             string
 	DeviceModel          string
 	OSVersion            string
+	WarmPoolID           string
 	Stack                string
 	MachineType          string
 	SystemImage          string
@@ -75,6 +76,9 @@ func (c apiClient) CreateDevicePreview(artifactSlug string, opts previewOptions)
 	}
 	if opts.OSVersion != "" {
 		form.Set("os_version", opts.OSVersion)
+	}
+	if opts.WarmPoolID != "" {
+		form.Set("warm_pool_id", opts.WarmPoolID)
 	}
 	if opts.Stack != "" {
 		form.Set("stack_id", opts.Stack)

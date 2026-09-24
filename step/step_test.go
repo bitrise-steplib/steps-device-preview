@@ -100,6 +100,16 @@ func TestProcessConfig(t *testing.T) {
 			overrides: map[string]string{"auto_terminate_minutes": "0"},
 			wantErr:   "auto_terminate_minutes must be positive, got 0",
 		},
+		{
+			name:      "a warm pool is kept, trimmed",
+			overrides: map[string]string{"warm_pool_id": " ios-devs "},
+			want:      func(t *testing.T, config Config) { require.Equal(t, "ios-devs", config.WarmPoolID) },
+		},
+		{
+			name:      "a warm pool fixes the device and the machine",
+			overrides: map[string]string{"warm_pool_id": "ios-devs", "device_model": "iPhone 15", "machine_type": "g2.mac.large", "emulator_cores": "4"},
+			wantErr:   "device_model, machine_type, emulator_cores cannot be used with warm_pool_id: the warm pool fixes the device and the machine",
+		},
 	}
 
 	for _, tt := range tests {
@@ -266,6 +276,28 @@ func TestRun(t *testing.T) {
 			"ttl_seconds":                    {"7200"},
 			"session_auto_terminate_minutes": {"30"},
 		}, form)
+	})
+
+	t.Run("passes the warm pool through, with the platform the pool must match", func(t *testing.T) {
+		api := newFakeBuildAPI(t)
+		apkPath := writeFile(t, "app-debug.apk", "not really an apk")
+
+		_, err := newTestStep().Run(Config{
+			AppPath:                 apkPath,
+			WarmPoolID:              "android-reviewers",
+			PermanentDownloadURLMap: "app-debug.apk=>https://app.bitrise.io/artifact/deployed-2/download",
+			BuildURL:                api.server.URL,
+			BuildAPIToken:           "token",
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"POST /artifacts/deployed-2/device_preview"}, api.calls())
+		require.Equal(t, url.Values{
+			"api_token":       {"token"},
+			"platform":        {PlatformAndroid},
+			"post_pr_comment": {"false"},
+			"warm_pool_id":    {"android-reviewers"},
+		}, api.requests[0].form)
 	})
 
 	t.Run("reports a pull request comment that did not land without failing", func(t *testing.T) {

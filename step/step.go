@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/bitrise-io/go-steputils/v2/stepconf"
 	"github.com/bitrise-io/go-utils/v2/log"
@@ -25,6 +26,8 @@ type Input struct {
 	Platform    string `env:"platform"`
 	DeviceModel string `env:"device_model"`
 	OSVersion   string `env:"os_version"`
+
+	WarmPoolID string `env:"warm_pool_id"`
 
 	Stack            string `env:"stack"`
 	MachineType      string `env:"machine_type"`
@@ -52,6 +55,10 @@ type Config struct {
 	Platform    string
 	DeviceModel string
 	OSVersion   string
+
+	// Empty means "boot a device per open"; set, the link's opens are served from
+	// this warm pool and the device is the pool's.
+	WarmPoolID string
 
 	Stack            string
 	MachineType      string
@@ -139,11 +146,12 @@ func (s DevicePreview) ProcessConfig() (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{
+	config := Config{
 		AppPath:                 input.AppPath,
 		Platform:                platform,
 		DeviceModel:             input.DeviceModel,
 		OSVersion:               input.OSVersion,
+		WarmPoolID:              strings.TrimSpace(input.WarmPoolID),
 		Stack:                   input.Stack,
 		MachineType:             input.MachineType,
 		SystemImage:             input.SystemImage,
@@ -156,7 +164,41 @@ func (s DevicePreview) ProcessConfig() (Config, error) {
 		PermanentDownloadURLMap: input.PermanentDownloadURLMap,
 		BuildURL:                input.BuildURL,
 		BuildAPIToken:           string(input.BuildAPIToken),
-	}, nil
+	}
+	if err := verifyWarmPoolConfig(config); err != nil {
+		return Config{}, err
+	}
+	return config, nil
+}
+
+// verifyWarmPoolConfig rejects device and machine options next to a warm pool: the pool fixes
+// both, and the backend refuses the combination — better to say so before uploading anything.
+func verifyWarmPoolConfig(config Config) error {
+	if config.WarmPoolID == "" {
+		return nil
+	}
+	var set []string
+	for _, in := range []struct {
+		name string
+		set  bool
+	}{
+		{"device_model", config.DeviceModel != ""},
+		{"os_version", config.OSVersion != ""},
+		{"stack", config.Stack != ""},
+		{"machine_type", config.MachineType != ""},
+		{"system_image", config.SystemImage != ""},
+		{"emulator_ram_mb", config.EmulatorRAMMB > 0},
+		{"emulator_cores", config.EmulatorCores > 0},
+		{"emulator_cold_boot", config.EmulatorColdBoot},
+	} {
+		if in.set {
+			set = append(set, in.name)
+		}
+	}
+	if len(set) > 0 {
+		return fmt.Errorf("%s cannot be used with warm_pool_id: the warm pool fixes the device and the machine", strings.Join(set, ", "))
+	}
+	return nil
 }
 
 // Run prepares the app, makes sure it exists as a build artifact, and mints the preview link.
@@ -203,6 +245,7 @@ func (s DevicePreview) Run(config Config) (Result, error) {
 		Platform:             artifact.Platform,
 		DeviceModel:          config.DeviceModel,
 		OSVersion:            config.OSVersion,
+		WarmPoolID:           config.WarmPoolID,
 		Stack:                config.Stack,
 		MachineType:          config.MachineType,
 		SystemImage:          config.SystemImage,
