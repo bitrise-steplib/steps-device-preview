@@ -76,9 +76,8 @@ inputs:
 
 - warm_pool_id: ""
   opts:
-    category: Device configuration
     title: Warm pool
-    summary: Serve the link's opens from a warm pool of pre-booted devices. Empty boots a device per open.
+    summary: Serve the link's opens from a warm pool of pre-booted devices. Empty boots a device per open using the device inputs below.
     description: |-
       ID or name of a Bitrise Remote Dev Environments warm pool to serve the link's opens from.
       Each open claims one of the pool's pre-booted device sessions when one is available, so the
