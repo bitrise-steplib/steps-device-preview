@@ -79,7 +79,9 @@ inputs:
     title: Warm pool
     summary: Serve the link's opens from a warm pool of pre-booted devices. Empty boots a device per open using the device inputs below.
     description: |-
-      ID or name of a Bitrise Remote Dev Environments warm pool to serve the link's opens from.
+      ID of a Bitrise Remote Dev Environments warm pool to serve the link's opens from — the UUID
+      shown on the pool's page in the RDE UI and by `bitrise-cli rde warm-pool view`; a pool name
+      is not resolved here.
       Each open claims one of the pool's pre-booted device sessions when one is available, so the
       click-to-app time is the app download rather than a VM boot; when none is available a
       session is created from the pool's configuration. The pool must be workspace-owned and its
@@ -90,7 +92,8 @@ inputs:
       fails before uploading anything if they are. Deleting the pool invalidates the links minted
       with it.
 
-      Warm pools are created in the Bitrise web UI or with `bitrise-cli rde warm-pool create`.
+      Warm pools are created in the Bitrise web UI or with `bitrise-cli rde warm-pool create`, and
+      the link's opens run the pool's template, including its scripts and stored inputs.
 
 - device_model: ""
   opts:
