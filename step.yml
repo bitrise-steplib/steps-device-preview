@@ -91,8 +91,11 @@ inputs:
       fails before uploading anything if they are. Deleting the pool invalidates the links minted
       with it.
 
-      Warm pools are created in the Bitrise web UI or with `bitrise-cli rde warm-pool create`, and
-      the link's opens run the pool's template, including its scripts and stored inputs.
+      A pool-backed link opens sessions built from the pool's template, so a reviewer's device
+      runs whatever that template's setup scripts and inputs set up. Without a pool, a link
+      opens a bare device with only the app installed.
+
+      Warm pools are created in the Bitrise web UI or with `bitrise-cli rde warm-pool create`.
 
 - device_model: ""
   opts:
